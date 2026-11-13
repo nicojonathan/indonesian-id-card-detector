@@ -19,6 +19,15 @@ if not os.path.exists(MODEL_PATH):
 
 model = YOLO(MODEL_PATH)
 
+@app.after_request
+def allow_iframe(response):
+    response.headers.pop("X-Frame-Options", None)
+
+    # Izinkan iframe dari domain mana pun.
+    response.headers["Content-Security-Policy"] = "frame-ancestors *"
+
+    return response
+
 @app.get("/")
 def index():
     return render_template("index.html")

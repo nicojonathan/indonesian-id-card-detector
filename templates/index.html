@@ -35,6 +35,26 @@
         overflow: hidden;
         aspect-ratio: 16 / 9;
       }
+      .capture-guide {
+        position: absolute;
+        border: 3px dotted #ffffff;
+        border-radius: 8px;
+        background: rgba(34, 197, 94, 0.04);
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.18);
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .capture-guide span {
+        position: absolute;
+        left: 50%;
+        bottom: -32px;
+        transform: translateX(-50%);
+        color: white;
+        font-size: 12px;
+        white-space: nowrap;
+        text-shadow: 0 1px 4px black;
+      }
       video,
       canvas {
         position: absolute;
@@ -103,13 +123,19 @@
       <div class="viewer">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
+        <div id="captureGuide" class="capture-guide">
+          <span>Posisikan KTP di dalam area ini</span>
+        </div>
       </div>
 
       <div id="status" class="status">Kamera belum dinyalakan</div>
 
       <div class="controls">
         <button id="startBtn">Nyalakan Kamera</button>
+
         <button id="stopBtn" class="secondary" disabled>Matikan Kamera</button>
+
+        <button id="captureBtn" disabled>Ambil Foto & Kirim</button>
       </div>
 
       <p class="hint">
@@ -127,11 +153,21 @@
       const statusEl = document.getElementById("status");
       const startBtn = document.getElementById("startBtn");
       const stopBtn = document.getElementById("stopBtn");
+      const captureBtn = document.getElementById("captureBtn");
+      const viewer = document.querySelector(".viewer");
+      const captureGuide = document.getElementById("captureGuide");
+
+      let latestDetections = [];
+      let isCapturing = false;
 
       let stream = null;
       let running = false;
       let busy = false;
       let timer = null;
+
+      updateCaptureGuide();
+      window.addEventListener("resize", updateCaptureGuide);
+      captureBtn.addEventListener("click", captureAndSend);
 
       function setStatus(message, kind = "") {
         statusEl.textContent = message;
@@ -150,6 +186,7 @@
           });
           video.srcObject = stream;
           await video.play();
+          updateCaptureGuide();
 
           running = true;
 
@@ -172,6 +209,10 @@
         clearOverlay();
         startBtn.disabled = false;
         stopBtn.disabled = true;
+
+        latestDetections = [];
+        captureBtn.disabled = true;
+
         setStatus("Kamera dimatikan");
       }
 
@@ -231,16 +272,25 @@
               ctx.font = `bold ${Math.max(14, w / 35)}px Arial`;
               const textW = ctx.measureText(label).width;
               const textH = Math.max(22, w / 28);
+
               ctx.fillStyle = "#22c55e";
               ctx.fillRect(x, Math.max(0, y - textH), textW + 12, textH);
+
               ctx.fillStyle = "#052e16";
               ctx.fillText(label, x + 6, Math.max(16, y - 6));
             });
+
+            latestDetections = data.detections || [];
+            captureBtn.disabled = latestDetections.length === 0;
+
             setStatus(
               `KTP terdeteksi (${data.detections.length} objek)`,
               "yes",
             );
           } else {
+            latestDetections = [];
+            captureBtn.disabled = true;
+
             setStatus("Tidak ada KTP Terdeteksi", "no");
           }
         } catch (err) {
@@ -248,6 +298,179 @@
         } finally {
           busy = false;
         }
+      }
+
+      async function captureAndSend() {
+        if (!running || isCapturing || latestDetections.length === 0) return;
+
+        isCapturing = true;
+        captureBtn.disabled = true;
+        captureBtn.textContent = "Memproses foto...";
+
+        try {
+          // Get crop coordinates from guide
+          const crop = getGuideCrop();
+
+          if (crop.sw <= 0 || crop.sh <= 0) {
+            throw new Error("Area capture tidak valid");
+          }
+
+          // Create cropped canvas
+          const captureCanvas = document.createElement("canvas");
+
+          captureCanvas.width = crop.sw;
+          captureCanvas.height = crop.sh;
+
+          const captureCtx = captureCanvas.getContext("2d");
+
+          // Crop only the area inside the guide
+          captureCtx.drawImage(
+            video,
+            crop.sx,
+            crop.sy,
+            crop.sw,
+            crop.sh,
+            0,
+            0,
+            crop.sw,
+            crop.sh,
+          );
+
+          // Convert cropped image to Blob
+          const blob = await new Promise((resolve) => {
+            captureCanvas.toBlob(resolve, "image/jpeg", 0.9);
+          });
+
+          if (!blob) {
+            throw new Error("Gagal mengambil foto");
+          }
+
+          // Convert Blob to File
+          const imageFile = new File([blob], "ktp-capture.jpg", {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+
+          // Send cropped image to parent
+          window.parent.postMessage(
+            {
+              type: "KTP_DETECTED",
+              payload: {
+                image: imageFile,
+                detections: latestDetections,
+                timestamp: new Date().toISOString(),
+                crop: {
+                  width: crop.sw,
+                  height: crop.sh,
+                },
+              },
+            },
+            "*",
+          );
+
+          setStatus("Foto KTP berhasil dikirim!", "yes");
+        } catch (err) {
+          setStatus("Gagal mengambil foto: " + err.message, "no");
+        } finally {
+          isCapturing = false;
+          captureBtn.textContent = "Ambil Foto & Kirim";
+
+          captureBtn.disabled = !running || latestDetections.length === 0;
+        }
+      }
+
+      function getGuideCrop() {
+        const videoRect = video.getBoundingClientRect();
+        const guideRect = captureGuide.getBoundingClientRect();
+
+        const scale = Math.min(
+          videoRect.width / video.videoWidth,
+          videoRect.height / video.videoHeight,
+        );
+
+        const displayW = video.videoWidth * scale;
+        const displayH = video.videoHeight * scale;
+
+        const offsetX = (videoRect.width - displayW) / 2;
+        const offsetY = (videoRect.height - displayH) / 2;
+
+        const displayLeft = videoRect.left + offsetX;
+        const displayTop = videoRect.top + offsetY;
+
+        const sx = Math.max(
+          0,
+          Math.round(
+            ((guideRect.left - displayLeft) / displayW) * video.videoWidth,
+          ),
+        );
+
+        const sy = Math.max(
+          0,
+          Math.round(
+            ((guideRect.top - displayTop) / displayH) * video.videoHeight,
+          ),
+        );
+
+        const ex = Math.min(
+          video.videoWidth,
+          Math.round(
+            ((guideRect.right - displayLeft) / displayW) * video.videoWidth,
+          ),
+        );
+
+        const ey = Math.min(
+          video.videoHeight,
+          Math.round(
+            ((guideRect.bottom - displayTop) / displayH) * video.videoHeight,
+          ),
+        );
+
+        return {
+          sx,
+          sy,
+          sw: ex - sx,
+          sh: ey - sy,
+        };
+      }
+
+      function updateCaptureGuide() {
+        const viewerW = viewer.clientWidth;
+        const viewerH = viewer.clientHeight;
+
+        // Rasio kartu KTP Indonesia
+        const ktpRatio = 85.6 / 54;
+
+        let displayW = viewerW;
+        let displayH = viewerH;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Jika kamera aktif, gunakan ukuran aktual video
+        if (video.videoWidth && video.videoHeight) {
+          const scale = Math.min(
+            viewerW / video.videoWidth,
+            viewerH / video.videoHeight,
+          );
+
+          displayW = video.videoWidth * scale;
+          displayH = video.videoHeight * scale;
+
+          offsetX = (viewerW - displayW) / 2;
+          offsetY = (viewerH - displayH) / 2;
+        }
+
+        // Hitung ukuran guide
+        const guideW = Math.min(displayW * 0.86, displayH * 0.82 * ktpRatio);
+
+        const guideH = guideW / ktpRatio;
+
+        // Posisikan guide tepat di tengah
+        captureGuide.style.width = `${guideW}px`;
+        captureGuide.style.height = `${guideH}px`;
+
+        captureGuide.style.left = `${offsetX + (displayW - guideW) / 2}px`;
+
+        captureGuide.style.top = `${offsetY + (displayH - guideH) / 2}px`;
       }
 
       startBtn.addEventListener("click", startCamera);
