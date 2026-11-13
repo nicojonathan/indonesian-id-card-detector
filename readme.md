@@ -1,4 +1,5 @@
-# KTP Detection with YOLO
+
+# ktp-yolo-webcam
 
 A lightweight web application for detecting Indonesian identity cards (**Kartu Tanda Penduduk / KTP**) in a live camera feed. It uses a trained Ultralytics YOLO model for server-side inference and provides a guided capture flow for integrating the cropped KTP image into a parent website.
 
@@ -35,21 +36,21 @@ A lightweight web application for detecting Indonesian identity cards (**Kartu T
 ## Project structure
 
 ```text
-ktp_yolo_webcam/
+ktp-yolo-webcam/
 ├── app.py
-├── best.pt                 # Add your trained YOLO weights here
+├── best.pt                 # Included trained YOLO model weights
 ├── requirements.txt
 ├── README.md
 └── templates/
     └── index.html
 ```
 
-The `best.pt` model file is not included. Use your own trained weights and make sure its KTP class mapping matches the configured class ID.
+The trained YOLO weights (`best.pt`) are included in this repository, so no separate model download is required. By default, `app.py` looks for `best.pt` relative to the current working directory. You can override this with the `MODEL_PATH` environment variable. If you replace the weights with another model, make sure its KTP class mapping matches `KTP_CLASS_ID`.
 
 ## Requirements
 
 - Python 3.9 or newer (use a Python version supported by your installed PyTorch/Ultralytics release).
-- A trained Ultralytics YOLO weights file, for example `best.pt`.
+- The bundled Ultralytics YOLO weights file (`best.pt`).
 - A modern browser with camera access support.
 - Camera access must be served from `localhost` or a secure context (**HTTPS**) in normal browser environments.
 
@@ -59,16 +60,12 @@ The `best.pt` model file is not included. Use your own trained weights and make 
 
 ```bash
 git clone <your-repository-url>
-cd ktp_yolo_webcam
+cd ktp-yolo-webcam
 ```
 
-If you downloaded the source archive instead, extract it and open a terminal in the `ktp_yolo_webcam` directory.
+If you downloaded the source archive instead, extract it and open a terminal in the `ktp-yolo-webcam` directory.
 
-### 2. Add the YOLO model
-
-Copy your trained model file into the project directory as `best.pt`, or set `MODEL_PATH` to its location.
-
-### 3. Create and activate a virtual environment
+### 2. Create and activate a virtual environment
 
 **Windows PowerShell**
 
@@ -84,13 +81,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 4. Install dependencies
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. Configure and run
+### 4. Configure and run
 
 Default configuration:
 
@@ -98,33 +95,33 @@ Default configuration:
 |---|---:|---|
 | `MODEL_PATH` | `best.pt` | Path to the trained YOLO weights |
 | `KTP_CLASS_ID` | `0` | Class index assigned to KTP in the model |
-| `YOLO_CONF` | `0.40` | Minimum confidence threshold for detections |
+| `YOLO_CONF` | `0.70` | Minimum confidence threshold for detections |
 
-**Windows PowerShell example**
+**Optional environment variable overrides — Windows PowerShell**
 
 ```powershell
 $env:MODEL_PATH="best.pt"
 $env:KTP_CLASS_ID="0"
-$env:YOLO_CONF="0.40"
+$env:YOLO_CONF="0.70"
 python app.py
 ```
 
-**macOS / Linux example**
+**Optional environment variable overrides — macOS / Linux**
 
 ```bash
 export MODEL_PATH="best.pt"
 export KTP_CLASS_ID="0"
-export YOLO_CONF="0.40"
+export YOLO_CONF="0.70"
 python app.py
 ```
 
-Or simply run with the defaults:
+All three variables are optional. If you do not set them, `app.py` uses the defaults shown above. Start the application with:
 
 ```bash
 python app.py
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000), select **Nyalakan Kamera**, and allow camera access.
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000), select **Nyalakan Kamera**, and allow camera access. The Flask development server binds to `127.0.0.1:5000` with `debug=False`.
 
 ## API
 
@@ -178,8 +175,8 @@ The application can be displayed inside an iframe. The parent page must grant ca
 For cross-origin embedding:
 
 - Serve both the parent page and the detection application over HTTPS.
-- Configure the detection server's Content Security Policy `frame-ancestors` directive to allow only the intended parent origin(s).
-- Do not send an `X-Frame-Options` policy that blocks the intended embedding origin.
+- The current `app.py` sets `Content-Security-Policy: frame-ancestors *`, which allows embedding from any origin. For production, replace `*` with only the intended parent origin(s).
+- The app removes the `X-Frame-Options` response header; avoid adding a conflicting frame-blocking policy elsewhere.
 - The browser may also require the parent page's Permissions Policy to allow camera access for the iframe.
 
 ### Capture message
